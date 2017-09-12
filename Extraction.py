@@ -14,12 +14,18 @@ import sys
 path=os.path.dirname(os.path.realpath(__file__))
 os.chdir(path)
 #
-
+U_proc=8
+U_char=1
+U_mult=1
+U_meth='CCSD(T)'
+U_basis='Aug-cc-pvDz'
+U_gjfdir='/gjf_files'
+U_extras='tran=abcd'
 ################################################################################
 """ Inf. to search in a typical Gaussian 17 log file""" ########################
 ################################################################################
 #Keys for search in a typical Gaussian 17 log file
-Gen_keys = {'Stoichiometry','(AMU),','basis:','Multiplicity'}
+Gen_keys = {'Stoichiometry','(AMU),','basis:','Multiplicity','Redundant'}
 Status_keys={'Normal termination','Job cpu','Elapsed'}
 Energy_keys={'HF=','MP2=','PG=','State='}
 
@@ -134,13 +140,51 @@ def Ext_X(Xword,Xwords,xfile,Kserch,DicData):
             DicData[name]=float(Xwords[x])
         elif Type=='S':    
             DicData[name]=Xwords[x]
+            
+## Geom extraction 
+def Ext_geom(zline,zfile):
+    znline=''
+    if 'Redundant' in zline:
+        znl=True
+        while znl:
+         zlineadd=zfile.next().strip()
+         if 'Recover' not in zlineadd:
+             znline+=zlineadd+'\n'
+         elif 'Recover' in zlineadd:    
+             znl=False
+             break  
+    return znline
+    
+def gjf_gene(zpath,zgeom,zchar,zmult,zmeth,zbasis,zname,zgjfdir,zproc,zextras):
+    
+    gjf_Dir=zpath+zgjfdir+'/'+str(zchar)+str(zmult)
+    zbasis_name=zbasis.replace('-','')
+    zN_cores='%nprocshared='+str(zproc)+'\n'
+    gjf_name=str(zname)+'_'+zbasis+".gjf"
+    zComm='#P '+ zmeth+' '+zbasis+' '+zextras+'\n\n'
+    if not os.path.exists(gjf_Dir):
+            os.makedirs(gjf_Dir)
+            
+    file=open(gjf_Dir+'/'+gjf_name,"w")
+    file.write(zN_cores+zComm+str(zname)+'\n\n'+str(zchar)+\
+    ' '+str(zmult)+'\n'+zgeom+'\n\n')
+        #+str(name)+'\n\n'+str(charge)+' '+str(multiplicity)+'\n'+geometryText+'\n\n')
+        #+str(name)+'\n\n'+str(userCharge)+' '+str(userMultiplicity)+'\n'+geometryText+'\n\n')
+    file.close()
+
+        #runfile = open(path+gjfFileFolder+'/'+str(userCharge)+str(userMultiplicity)+'/run', "a")     #a lets you append file
+        #runfile.write(gaussCommand+' '+str(name)+'_'+b[-2]+".gjf < parameters"+'\n')
+        #print(gaussCommand+' '+str(name)+'_'+b[-2]+".gjf < parameters"+'\n')         
 
 
 
-def Ext_Data(Logfile):
+def Ext_Data(Logpath,Logfile,Logname,Upc,Uch,Umlt,Umth,Ubss,Ugjfdir,Uxts):
+    #(path,currentfile,Curr_name,U_proc,U_char,U_mult,U_meth,U_basis,U_gjfdir,U_extras)
    with open(Logfile, 'r') as f:
 # Status data    
        for no,line in enumerate(readlinesreverse(f)):
+            if len(Status_keys)==0:
+               break 
             if any(x in line for x in Status_keys):
                if 'Normal termination' in line:
                    Status_keys.remove('Normal termination')
@@ -153,8 +197,12 @@ def Ext_Data(Logfile):
                      if word in Status_keys:
                         Status_keys.remove(word)
                         Ext_X(word,words,f,Kserch,Status_Data)
+                     if len(Status_keys)==0:
+                        break                         
 # Energy Data
        for no,line in enumerate(readlinesreversex2(f)):
+            if len(Energy_keys)==0:
+               break 
             valuesBlock=''.join(line)
             if any(x in valuesBlock for x in Energy_keys): 
                 valuesBlock=re.split(r'[\\\s]\s*',valuesBlock)
@@ -165,26 +213,42 @@ def Ext_Data(Logfile):
                            Ext_X(xkey,words,f,Kserch,Energy_Data)
                            Energy_keys.remove(xkey)
                            break  
-                           
-# General Data                                 
+                       if len(Energy_keys)==0:
+                            break         
+# General Data
+       f.seek(0)                                 
        for no, line in enumerate(f):
+           if len(Gen_keys)==0:
+              break 
            words = line.split()
            for word in words:
                if word in Gen_keys:
-                   Gen_keys.remove(word)
-                   Ext_X(word,words,f,Kserch,Gen_Data)
+                   if word=='Redundant':
+                       Geom_Line=Ext_geom(line,f)
+                       print Geom_Line
+                       gjf_gene(Logpath,Geom_Line,Uch,Umlt,Umth,Ubss,Logname,Ugjfdir,Upc,Uxts)
+                               #(zpath,zgeom,zchar,zmult,zmeth,zbasis,zname,zgjfdir,zproc,zextras):
+                       #(Logpath,Logfile,Logname,Upc,Uch,Umlt,Ubss,Ugjfdir,Uxts)
+                   else:    
+                       Ext_X(word,words,f,Kserch,Gen_Data)
+                   Gen_keys.remove(word) 
+               if len(Gen_keys)==0:
+                  break         
    return 'extraxtion done'
 
 ## List of files to extract              
 def List_Files(path,log_files_folder):
     logfiles=[]
+    lognames=[]
     for path, subdirs, files in os.walk(path+log_files_folder):
         for name in files:
             file_name,extrnsion=os.path.splitext(name)
             if extrnsion=='.log':
                 logfiles.append(os.path.join(path, name))
-    return logfiles   
+                lognames.append(file_name)
+    return logfiles,lognames    
               
+
 
 ################################                    
 """Excel file rutines"""  ######
@@ -243,14 +307,15 @@ def write_into_excel(path,Exc_title,workbook,worksheet,row,fileLoc,StatusD,Energ
     return
 
 
-    
+  
                                                                                                                                                                         
 #### Here everything working now we need to do a loop for N files and to create N files                                                                                                
-files=List_Files(path,'')  
+files,Lnames=List_Files(path,'')  
 workbook,worksheet=workbook_prep(path,'first','test.xlsx')  
 row=2
-for currentfile in files:
-  Ext_Data(currentfile)
+for indx,currentfile in enumerate(files,start=0):
+  Curr_name=Lnames[indx]  
+  Ext_Data(path,currentfile,Curr_name,U_proc,U_char,U_mult,U_meth,U_basis,U_gjfdir,U_extras)
   #write_into_excel(worksheet,row,currentfile,fileName,Status_Data,Energy_Data,Gen_Data)   
   write_into_excel(path,'test.xlsx',workbook,worksheet,row,currentfile,Status_Data,Energy_Data,Gen_Data)
   row+=1   
